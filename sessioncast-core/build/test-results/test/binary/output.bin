@@ -1,0 +1,17 @@
+=== Relay Connection Test ===
+Connecting...
+š10:39:03.584 [WebSocketConnectReadThread-26] INFO io.sessioncast.core.client.RelayWebSocketClient -- WebSocket connected to wss://relay.sessioncast.io/ws
+[EVENT] Connected!
+Connection successful!
+"Creating session: relay-test-3616
+s10:39:03.635 [sessioncast-client] INFO io.sessioncast.core.tmux.TmuxController -- Created session: relay-test-3616
+†10:39:03.637 [sessioncast-event] INFO io.sessioncast.core.screen.ScreenCapture -- Started screen capture for session: relay-test-3616
+z10:39:03.637 [sessioncast-event] INFO io.sessioncast.core.SessionCastClient -- Started streaming session: relay-test-3616
+‡10:39:04.657 [sessioncast-client] INFO io.sessioncast.core.screen.ScreenCapture -- Stopped screen capture for session: relay-test-3616
+{10:39:04.657 [sessioncast-client] INFO io.sessioncast.core.SessionCastClient -- Stopped streaming session: relay-test-3616
+r10:39:04.665 [sessioncast-client] INFO io.sessioncast.core.tmux.TmuxController -- Killed session: relay-test-3616
+Session cleaned up
+˜10:39:04.817 [WebSocketConnectReadThread-26] INFO io.sessioncast.core.client.RelayWebSocketClient -- WebSocket closed: code=1000, reason=, remote=false
+[EVENT] Disconnected: NORMAL
+b10:39:04.818 [Test worker] INFO io.sessioncast.core.SessionCastClient -- SessionCastClient closed
+Test complete!
