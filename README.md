@@ -19,10 +19,10 @@ dependencyResolutionManagement {
 
 // build.gradle.kts
 dependencies {
-    implementation("com.github.sessioncast.sessioncast-java:sessioncast-core:v1.0.0")
+    implementation("com.github.sessioncast.sessioncast-java:sessioncast-core:1.1.0")
 
     // Or with Spring Boot
-    implementation("com.github.sessioncast.sessioncast-java:sessioncast-spring-boot-starter:v1.0.0")
+    implementation("com.github.sessioncast.sessioncast-java:sessioncast-spring-boot-starter:1.1.0")
 }
 ```
 
