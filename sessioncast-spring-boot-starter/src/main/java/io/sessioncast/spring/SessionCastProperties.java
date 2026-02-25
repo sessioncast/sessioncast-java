@@ -13,6 +13,7 @@ public class SessionCastProperties {
     private final Relay relay = new Relay();
     private final Agent agent = new Agent();
     private final Reconnect reconnect = new Reconnect();
+    private final Api api = new Api();
 
     public Relay getRelay() {
         return relay;
@@ -24,6 +25,10 @@ public class SessionCastProperties {
 
     public Reconnect getReconnect() {
         return reconnect;
+    }
+
+    public Api getApi() {
+        return api;
     }
 
     public static class Relay {
@@ -172,6 +177,34 @@ public class SessionCastProperties {
 
         public void setCircuitBreakerDuration(Duration circuitBreakerDuration) {
             this.circuitBreakerDuration = circuitBreakerDuration;
+        }
+    }
+
+    public static class Api {
+        /**
+         * Default timeout for API requests (exec, send_keys, list_sessions).
+         */
+        private Duration timeout = Duration.ofSeconds(30);
+
+        /**
+         * Timeout for LLM chat requests (can be slow depending on model).
+         */
+        private Duration llmTimeout = Duration.ofMinutes(5);
+
+        public Duration getTimeout() {
+            return timeout;
+        }
+
+        public void setTimeout(Duration timeout) {
+            this.timeout = timeout;
+        }
+
+        public Duration getLlmTimeout() {
+            return llmTimeout;
+        }
+
+        public void setLlmTimeout(Duration llmTimeout) {
+            this.llmTimeout = llmTimeout;
         }
     }
 }

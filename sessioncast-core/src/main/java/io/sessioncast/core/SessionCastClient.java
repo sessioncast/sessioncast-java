@@ -1,5 +1,8 @@
 package io.sessioncast.core;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.sessioncast.core.api.*;
 import io.sessioncast.core.client.RelayConfig;
 import io.sessioncast.core.client.RelayWebSocketClient;
 import io.sessioncast.core.event.Disposable;
@@ -18,8 +21,10 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.function.Consumer;
 
@@ -62,6 +67,15 @@ public class SessionCastClient implements AutoCloseable {
     private final Map<String, Disposable> sessionScreenSubscriptions = new ConcurrentHashMap<>();
     private final boolean autoStreamOnCreate;
 
+    // API support
+    private final ApiRequestCorrelator apiCorrelator;
+    private final ObjectMapper objectMapper;
+    private final Duration apiTimeout;
+    private final Duration llmTimeout;
+    private final java.util.Set<Capability> requiredCapabilities;
+    private final java.util.Set<Capability> grantedCapabilities = ConcurrentHashMap.newKeySet();
+    private final CompletableFuture<java.util.Set<Capability>> capabilityFuture = new CompletableFuture<>();
+
     private SessionCastClient(Builder builder) {
         this.config = builder.buildConfig();
         this.eventBus = new EventBus(true);
@@ -69,6 +83,20 @@ public class SessionCastClient implements AutoCloseable {
         this.screenCapture = new ScreenCapture(tmux, new ScreenCompressor());
         this.wsClient = new RelayWebSocketClient(config, eventBus);
         this.autoStreamOnCreate = builder.autoStreamOnCreate;
+        this.apiTimeout = builder.apiTimeout;
+        this.llmTimeout = builder.llmTimeout;
+        this.objectMapper = new ObjectMapper();
+        this.apiCorrelator = new ApiRequestCorrelator(builder.apiTimeout);
+        this.wsClient.setApiCorrelator(apiCorrelator);
+        this.requiredCapabilities = builder.requiredCapabilities.isEmpty()
+            ? java.util.Set.of() : java.util.EnumSet.copyOf(builder.requiredCapabilities);
+        if (!this.requiredCapabilities.isEmpty()) {
+            String capsStr = this.requiredCapabilities.stream()
+                .map(Capability::value)
+                .reduce((a, b) -> a + "," + b)
+                .orElse("");
+            this.wsClient.setRequiredCapabilities(capsStr);
+        }
 
         this.scheduler = Executors.newScheduledThreadPool(2, r -> {
             Thread t = new Thread(r, "sessioncast-client");
@@ -281,6 +309,203 @@ public class SessionCastClient implements AutoCloseable {
         return eventBus.subscribe(KeysReceivedEvent.class, handler);
     }
 
+    // ========== Non-Interactive API ==========
+
+    /**
+     * Execute a shell command on the CLI agent's machine.
+     * The command runs in the agent's default working directory.
+     *
+     * <pre>{@code
+     * client.exec("echo hello").thenAccept(result -> {
+     *     System.out.println(result.stdout()); // "hello\n"
+     * });
+     * }</pre>
+     *
+     * @param command the shell command to execute
+     * @return a future that resolves with the execution result
+     */
+    public CompletableFuture<ExecResult> exec(String command) {
+        return exec(command, ExecOptions.defaults());
+    }
+
+    /**
+     * Execute a shell command with options.
+     *
+     * <pre>{@code
+     * client.exec("ls -la", ExecOptions.builder()
+     *     .timeout(Duration.ofSeconds(60))
+     *     .build());
+     * }</pre>
+     *
+     * @param command the shell command to execute
+     * @param options execution options (timeout, etc.)
+     * @return a future that resolves with the execution result
+     */
+    public CompletableFuture<ExecResult> exec(String command, ExecOptions options) {
+        // Check EXEC_CWD capability if cwd is specified
+        if (options.cwd() != null && !grantedCapabilities.contains(Capability.EXEC_CWD)) {
+            return CompletableFuture.failedFuture(
+                new SecurityException("Capability EXEC_CWD not granted. "
+                    + "The user's CLI agent must allow exec_cwd to specify a working directory.")
+            );
+        }
+
+        String requestId = UUID.randomUUID().toString();
+
+        Map<String, String> payload = new HashMap<>();
+        payload.put("command", command);
+        if (options.cwd() != null) {
+            payload.put("cwd", options.cwd());
+        }
+        if (options.sessionId() != null) {
+            payload.put("sessionId", options.sessionId());
+        }
+
+        Map<String, String> meta = new HashMap<>();
+        meta.put("requestId", requestId);
+        try {
+            meta.put("payload", objectMapper.writeValueAsString(payload));
+        } catch (JsonProcessingException e) {
+            return CompletableFuture.failedFuture(e);
+        }
+
+        Duration timeout = options.timeout() != null ? options.timeout() : apiTimeout;
+        CompletableFuture<String> responseFuture = apiCorrelator.register(requestId, timeout);
+        wsClient.send(new ExecMessage(meta));
+
+        return responseFuture.thenApply(raw -> {
+            try {
+                return objectMapper.readValue(raw, ExecResult.class);
+            } catch (JsonProcessingException e) {
+                throw new CompletionException(e);
+            }
+        });
+    }
+
+    /**
+     * Send an LLM chat request to the CLI agent's local AI.
+     *
+     * @param request the chat request
+     * @return a future that resolves with the LLM response
+     */
+    public CompletableFuture<LlmChatResponse> llmChat(LlmChatRequest request) {
+        String requestId = UUID.randomUUID().toString();
+
+        Map<String, String> meta = new HashMap<>();
+        meta.put("requestId", requestId);
+        try {
+            meta.put("payload", objectMapper.writeValueAsString(request));
+        } catch (JsonProcessingException e) {
+            return CompletableFuture.failedFuture(e);
+        }
+
+        CompletableFuture<String> responseFuture = apiCorrelator.register(requestId, llmTimeout);
+        wsClient.send(new LlmChatMessage(meta));
+
+        return responseFuture.thenApply(raw -> {
+            try {
+                return objectMapper.readValue(raw, LlmChatResponse.class);
+            } catch (JsonProcessingException e) {
+                throw new CompletionException(e);
+            }
+        });
+    }
+
+    /**
+     * Send keys to a tmux session via non-interactive API.
+     * If target is null, the CLI agent uses its default/active session.
+     *
+     * @param keys  keys to send
+     * @param enter whether to press Enter after keys
+     * @return a future that resolves with the raw API response
+     */
+    public CompletableFuture<ApiResponse> apiSendKeys(String keys, boolean enter) {
+        return apiSendKeys(null, keys, enter);
+    }
+
+    /**
+     * Send keys to a specific tmux session/pane via non-interactive API.
+     *
+     * @param target the tmux session/pane target (null for agent's default session)
+     * @param keys   keys to send
+     * @param enter  whether to press Enter after keys
+     * @return a future that resolves with the raw API response
+     */
+    public CompletableFuture<ApiResponse> apiSendKeys(String target, String keys, boolean enter) {
+        String requestId = UUID.randomUUID().toString();
+
+        Map<String, String> payload = new HashMap<>();
+        if (target != null) {
+            payload.put("target", target);
+        }
+        payload.put("keys", keys);
+        payload.put("enter", String.valueOf(enter));
+
+        Map<String, String> meta = new HashMap<>();
+        meta.put("requestId", requestId);
+        try {
+            meta.put("payload", objectMapper.writeValueAsString(payload));
+        } catch (JsonProcessingException e) {
+            return CompletableFuture.failedFuture(e);
+        }
+
+        CompletableFuture<String> responseFuture = apiCorrelator.register(requestId);
+        wsClient.send(new SendKeysApiMessage(meta));
+
+        return responseFuture.thenApply(raw -> new ApiResponse(requestId, raw));
+    }
+
+    /**
+     * List tmux sessions on the CLI agent's machine via non-interactive API.
+     *
+     * @return a future that resolves with the raw API response
+     */
+    public CompletableFuture<ApiResponse> apiListSessions() {
+        String requestId = UUID.randomUUID().toString();
+
+        Map<String, String> meta = new HashMap<>();
+        meta.put("requestId", requestId);
+        meta.put("payload", "{}");
+
+        CompletableFuture<String> responseFuture = apiCorrelator.register(requestId);
+        wsClient.send(new ListSessionsApiMessage(meta));
+
+        return responseFuture.thenApply(raw -> new ApiResponse(requestId, raw));
+    }
+
+    /**
+     * Check if a capability has been granted by the CLI agent.
+     */
+    public boolean hasCapability(Capability capability) {
+        return grantedCapabilities.contains(capability);
+    }
+
+    /**
+     * Get all granted capabilities.
+     */
+    public java.util.Set<Capability> getGrantedCapabilities() {
+        return java.util.Set.copyOf(grantedCapabilities);
+    }
+
+    /**
+     * Wait for capability negotiation to complete.
+     * Returns the set of granted capabilities.
+     * If no capabilities were requested, returns immediately with an empty set.
+     */
+    public CompletableFuture<java.util.Set<Capability>> awaitCapabilities() {
+        if (requiredCapabilities.isEmpty()) {
+            return CompletableFuture.completedFuture(java.util.Set.of());
+        }
+        return capabilityFuture;
+    }
+
+    /**
+     * Subscribe to API response events.
+     */
+    public Disposable onApiResponse(Consumer<ApiResponseEvent> handler) {
+        return eventBus.subscribe(ApiResponseEvent.class, handler);
+    }
+
     // ========== Internal Setup ==========
 
     private void setupEventHandlers() {
@@ -312,6 +537,20 @@ public class SessionCastClient implements AutoCloseable {
         eventBus.subscribe(SessionKilledEvent.class, event -> {
             stopStreaming(event.sessionName());
         });
+
+        // Handle capability results from CLI agent
+        eventBus.subscribe(CapabilityResultEvent.class, event -> {
+            grantedCapabilities.clear();
+            for (String cap : event.granted()) {
+                try {
+                    grantedCapabilities.add(Capability.fromValue(cap));
+                } catch (IllegalArgumentException e) {
+                    log.warn("Unknown granted capability: {}", cap);
+                }
+            }
+            log.info("Capabilities granted: {}, denied: {}", event.granted(), event.denied());
+            capabilityFuture.complete(java.util.Set.copyOf(grantedCapabilities));
+        });
     }
 
     // ========== Cleanup ==========
@@ -322,6 +561,7 @@ public class SessionCastClient implements AutoCloseable {
         sessionScreenSubscriptions.keySet().forEach(this::stopStreaming);
 
         // Close components
+        apiCorrelator.close();
         screenCapture.close();
         wsClient.close();
         eventBus.close();
@@ -352,6 +592,9 @@ public class SessionCastClient implements AutoCloseable {
         private int maxReconnectAttempts = 5;
         private boolean autoStreamOnCreate = true;
         private TmuxController tmuxController;
+        private Duration apiTimeout = Duration.ofSeconds(30);
+        private Duration llmTimeout = Duration.ofMinutes(5);
+        private final java.util.Set<Capability> requiredCapabilities = java.util.EnumSet.noneOf(Capability.class);
 
         public Builder relay(String url) {
             this.relay = url;
@@ -396,6 +639,25 @@ public class SessionCastClient implements AutoCloseable {
 
         public Builder tmuxController(TmuxController controller) {
             this.tmuxController = controller;
+            return this;
+        }
+
+        public Builder apiTimeout(Duration timeout) {
+            this.apiTimeout = timeout;
+            return this;
+        }
+
+        public Builder llmTimeout(Duration timeout) {
+            this.llmTimeout = timeout;
+            return this;
+        }
+
+        /**
+         * Declare capabilities this service requires from the CLI agent.
+         * The user will be asked to grant these capabilities when connecting.
+         */
+        public Builder requiredCapabilities(Capability... capabilities) {
+            java.util.Collections.addAll(this.requiredCapabilities, capabilities);
             return this;
         }
 

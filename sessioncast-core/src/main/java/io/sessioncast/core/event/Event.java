@@ -15,7 +15,9 @@ public sealed interface Event permits
         Event.SessionCreatedEvent,
         Event.SessionKilledEvent,
         Event.ResizeRequestEvent,
-        Event.ErrorEvent {
+        Event.ErrorEvent,
+        Event.ApiResponseEvent,
+        Event.CapabilityResultEvent {
 
     Instant timestamp();
 
@@ -34,6 +36,14 @@ public sealed interface Event permits
     record ResizeRequestEvent(String sessionName, int cols, int rows, Instant timestamp) implements Event {}
 
     record ErrorEvent(SessionCastException exception, Instant timestamp) implements Event {}
+
+    record ApiResponseEvent(String requestId, String payload, Instant timestamp) implements Event {}
+
+    record CapabilityResultEvent(
+        java.util.Set<String> granted,
+        java.util.Set<String> denied,
+        Instant timestamp
+    ) implements Event {}
 
     enum DisconnectReason {
         NORMAL,

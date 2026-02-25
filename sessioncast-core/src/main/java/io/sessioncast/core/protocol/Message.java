@@ -29,6 +29,19 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
     @JsonSubTypes.Type(value = Message.ErrorMessage.class, name = "error"),
     @JsonSubTypes.Type(value = Message.PingMessage.class, name = "ping"),
     @JsonSubTypes.Type(value = Message.PongMessage.class, name = "pong"),
+
+    // API Request Messages (SDK → Relay → CLI)
+    @JsonSubTypes.Type(value = Message.ExecMessage.class, name = "exec"),
+    @JsonSubTypes.Type(value = Message.LlmChatMessage.class, name = "llm_chat"),
+    @JsonSubTypes.Type(value = Message.SendKeysApiMessage.class, name = "send_keys"),
+    @JsonSubTypes.Type(value = Message.ListSessionsApiMessage.class, name = "list_sessions"),
+
+    // API Response Message (CLI → Relay → SDK)
+    @JsonSubTypes.Type(value = Message.ApiResponseMessage.class, name = "api_response"),
+
+    // Capability Handshake
+    @JsonSubTypes.Type(value = Message.CapabilityRequestMessage.class, name = "capability_request"),
+    @JsonSubTypes.Type(value = Message.CapabilityResultMessage.class, name = "capability_result"),
 })
 @JsonIgnoreProperties(ignoreUnknown = true)
 public sealed interface Message permits
@@ -47,7 +60,14 @@ public sealed interface Message permits
     Message.UploadFileMessage,
     Message.ErrorMessage,
     Message.PingMessage,
-    Message.PongMessage {
+    Message.PongMessage,
+    Message.ExecMessage,
+    Message.LlmChatMessage,
+    Message.SendKeysApiMessage,
+    Message.ListSessionsApiMessage,
+    Message.ApiResponseMessage,
+    Message.CapabilityRequestMessage,
+    Message.CapabilityResultMessage {
 
     String type();
 
@@ -57,10 +77,15 @@ public sealed interface Message permits
         @JsonProperty("machineId") String machineId,
         @JsonProperty("label") String label,
         @JsonProperty("token") String token,
-        @JsonProperty("role") String role
+        @JsonProperty("role") String role,
+        @JsonProperty("requiredCapabilities") String requiredCapabilities
     ) implements Message {
         public RegisterMessage(String machineId, String label, String token) {
-            this(machineId, label, token, "host");
+            this(machineId, label, token, "host", null);
+        }
+
+        public RegisterMessage(String machineId, String label, String token, String role) {
+            this(machineId, label, token, role, null);
         }
 
         @Override
@@ -197,5 +222,68 @@ public sealed interface Message permits
     record PongMessage() implements Message {
         @Override
         public String type() { return "pong"; }
+    }
+
+    // ========== API Request Messages (SDK → Relay → CLI) ==========
+
+    record ExecMessage(
+        @JsonProperty("meta") java.util.Map<String, String> meta
+    ) implements Message {
+        @Override
+        public String type() { return "exec"; }
+    }
+
+    record LlmChatMessage(
+        @JsonProperty("meta") java.util.Map<String, String> meta
+    ) implements Message {
+        @Override
+        public String type() { return "llm_chat"; }
+    }
+
+    record SendKeysApiMessage(
+        @JsonProperty("meta") java.util.Map<String, String> meta
+    ) implements Message {
+        @Override
+        public String type() { return "send_keys"; }
+    }
+
+    record ListSessionsApiMessage(
+        @JsonProperty("meta") java.util.Map<String, String> meta
+    ) implements Message {
+        @Override
+        public String type() { return "list_sessions"; }
+    }
+
+    // ========== API Response Message (CLI → Relay → SDK) ==========
+
+    record ApiResponseMessage(
+        @JsonProperty("meta") java.util.Map<String, String> meta
+    ) implements Message {
+        @Override
+        public String type() { return "api_response"; }
+    }
+
+    // ========== Capability Handshake Messages ==========
+
+    /**
+     * Sent from Relay to CLI agent when an SDK connects with required capabilities.
+     * meta: { "from": "service-name", "capabilities": "exec,exec_cwd,llm_chat" }
+     */
+    record CapabilityRequestMessage(
+        @JsonProperty("meta") java.util.Map<String, String> meta
+    ) implements Message {
+        @Override
+        public String type() { return "capability_request"; }
+    }
+
+    /**
+     * Sent from Relay to SDK with the grant/deny result.
+     * meta: { "granted": "exec,llm_chat", "denied": "exec_cwd" }
+     */
+    record CapabilityResultMessage(
+        @JsonProperty("meta") java.util.Map<String, String> meta
+    ) implements Message {
+        @Override
+        public String type() { return "capability_result"; }
     }
 }

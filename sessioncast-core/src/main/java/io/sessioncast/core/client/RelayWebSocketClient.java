@@ -1,5 +1,6 @@
 package io.sessioncast.core.client;
 
+import io.sessioncast.core.api.ApiRequestCorrelator;
 import io.sessioncast.core.event.Event;
 import io.sessioncast.core.event.Event.*;
 import io.sessioncast.core.event.EventBus;
@@ -27,6 +28,8 @@ public class RelayWebSocketClient implements AutoCloseable {
     private final EventBus eventBus;
     private final MessageCodec codec;
     private final ScheduledExecutorService scheduler;
+    private volatile ApiRequestCorrelator apiCorrelator;
+    private volatile String requiredCapabilitiesStr;
 
     private volatile WebSocketClient wsClient;
     private volatile boolean connected = false;
@@ -48,6 +51,20 @@ public class RelayWebSocketClient implements AutoCloseable {
             t.setDaemon(true);
             return t;
         });
+    }
+
+    /**
+     * Set the API request correlator for resolving API response futures.
+     */
+    public void setApiCorrelator(ApiRequestCorrelator correlator) {
+        this.apiCorrelator = correlator;
+    }
+
+    /**
+     * Set required capabilities to include in registration message.
+     */
+    public void setRequiredCapabilities(String capabilities) {
+        this.requiredCapabilitiesStr = capabilities;
     }
 
     // ========== Connection Management ==========
@@ -180,8 +197,10 @@ public class RelayWebSocketClient implements AutoCloseable {
                 connected = true;
                 resetReconnectAttempts();
 
-                // Send registration message
-                RelayWebSocketClient.this.send(new RegisterMessage(config.machineId(), config.label(), config.token()));
+                // Send registration message with required capabilities
+                RelayWebSocketClient.this.send(new RegisterMessage(
+                    config.machineId(), config.label(), config.token(), "host", requiredCapabilitiesStr
+                ));
 
                 eventBus.publish(new ConnectedEvent(config.machineId(), Instant.now()));
 
@@ -246,6 +265,10 @@ public class RelayWebSocketClient implements AutoCloseable {
                     new SessionCastException(error.code(), error.message()),
                     Instant.now()
                 ));
+            } else if (message instanceof ApiResponseMessage apiResponse) {
+                handleApiResponse(apiResponse);
+            } else if (message instanceof CapabilityResultMessage capResult) {
+                handleCapabilityResult(capResult);
             } else if (message instanceof PingMessage) {
                 send(new PongMessage());
             } else {
@@ -253,6 +276,60 @@ public class RelayWebSocketClient implements AutoCloseable {
             }
         } catch (Exception e) {
             log.error("Failed to handle message: {}", e.getMessage());
+        }
+    }
+
+    private void handleCapabilityResult(CapabilityResultMessage capResult) {
+        var meta = capResult.meta();
+        if (meta == null) return;
+
+        String grantedStr = meta.getOrDefault("granted", "");
+        String deniedStr = meta.getOrDefault("denied", "");
+
+        var granted = new java.util.HashSet<String>();
+        var denied = new java.util.HashSet<String>();
+
+        if (!grantedStr.isEmpty()) {
+            for (String cap : grantedStr.split(",")) {
+                granted.add(cap.trim());
+            }
+        }
+        if (!deniedStr.isEmpty()) {
+            for (String cap : deniedStr.split(",")) {
+                denied.add(cap.trim());
+            }
+        }
+
+        log.info("Capability result: granted={}, denied={}", granted, denied);
+        eventBus.publish(new Event.CapabilityResultEvent(granted, denied, Instant.now()));
+    }
+
+    private void handleApiResponse(ApiResponseMessage apiResponse) {
+        var meta = apiResponse.meta();
+        if (meta == null) {
+            log.warn("Received api_response with no meta");
+            return;
+        }
+
+        String requestId = meta.get("requestId");
+        String payload = meta.get("payload");
+        String error = meta.get("error");
+
+        if (requestId == null) {
+            log.warn("Received api_response with no requestId");
+            return;
+        }
+
+        // Publish event
+        eventBus.publish(new ApiResponseEvent(requestId, payload, Instant.now()));
+
+        // Resolve correlator future
+        if (apiCorrelator != null) {
+            if (error != null && !error.isEmpty()) {
+                apiCorrelator.completeExceptionally(requestId, error);
+            } else {
+                apiCorrelator.complete(requestId, payload != null ? payload : "");
+            }
         }
     }
 

@@ -2,6 +2,46 @@
 
 Java library for integrating with [SessionCast](https://sessioncast.io) - a real-time terminal sharing platform.
 
+## Installation
+
+### JitPack
+
+Add JitPack repository and the dependency:
+
+```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement {
+    repositories {
+        mavenCentral()
+        maven { url = uri("https://jitpack.io") }
+    }
+}
+
+// build.gradle.kts
+dependencies {
+    implementation("com.github.sessioncast.sessioncast-java:sessioncast-core:v1.0.0")
+
+    // Or with Spring Boot
+    implementation("com.github.sessioncast.sessioncast-java:sessioncast-spring-boot-starter:v1.0.0")
+}
+```
+
+```xml
+<!-- Maven -->
+<repositories>
+    <repository>
+        <id>jitpack.io</id>
+        <url>https://jitpack.io</url>
+    </repository>
+</repositories>
+
+<dependency>
+    <groupId>com.github.sessioncast.sessioncast-java</groupId>
+    <artifactId>sessioncast-core</artifactId>
+    <version>v1.0.0</version>
+</dependency>
+```
+
 ## Modules
 
 | Module | Description |
@@ -9,28 +49,7 @@ Java library for integrating with [SessionCast](https://sessioncast.io) - a real
 | `sessioncast-core` | Core library with WebSocket client, tmux control, screen capture |
 | `sessioncast-spring-boot-starter` | Spring Boot auto-configuration |
 
-## Quick Start
-
-### Gradle (Kotlin DSL)
-
-```kotlin
-dependencies {
-    implementation("io.sessioncast:sessioncast-core:1.0.0-SNAPSHOT")
-
-    // Or with Spring Boot
-    implementation("io.sessioncast:sessioncast-spring-boot-starter:1.0.0-SNAPSHOT")
-}
-```
-
-### Maven
-
-```xml
-<dependency>
-    <groupId>io.sessioncast</groupId>
-    <artifactId>sessioncast-core</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
-</dependency>
-```
+> Spring AI 통합은 별도 레포 [sessioncast-spring-ai](https://github.com/sessioncast/sessioncast-spring-ai)를 참조하세요.
 
 ## Usage
 

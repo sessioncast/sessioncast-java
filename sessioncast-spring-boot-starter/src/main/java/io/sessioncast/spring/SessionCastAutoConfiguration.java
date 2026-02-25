@@ -36,6 +36,7 @@ public class SessionCastAutoConfiguration {
         SessionCastProperties.Relay relay = props.getRelay();
         SessionCastProperties.Agent agent = props.getAgent();
         SessionCastProperties.Reconnect reconnect = props.getReconnect();
+        SessionCastProperties.Api api = props.getApi();
 
         return SessionCastClient.builder()
             .relay(relay.getUrl())
@@ -47,6 +48,8 @@ public class SessionCastAutoConfiguration {
             .maxReconnectAttempts(reconnect.getMaxAttempts())
             .autoStreamOnCreate(agent.isAutoStreamOnCreate())
             .tmuxController(tmuxController)
+            .apiTimeout(api.getTimeout())
+            .llmTimeout(api.getLlmTimeout())
             .build();
     }
 

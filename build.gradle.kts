@@ -38,7 +38,7 @@ subprojects {
                 pom {
                     name.set(project.name)
                     description.set("SessionCast Java Library - ${project.name}")
-                    url.set("https://github.com/devload/sessioncast-java")
+                    url.set("https://github.com/sessioncast/sessioncast-java")
 
                     licenses {
                         license {
