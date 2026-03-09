@@ -31,8 +31,22 @@ subprojects {
     }
 
     publishing {
+        repositories {
+            maven {
+                name = "GitHubPackages"
+                url = uri("https://maven.pkg.github.com/sessioncast/sessioncast-java")
+                credentials {
+                    username = System.getenv("GITHUB_ACTOR") ?: findProperty("gpr.user") as String? ?: ""
+                    password = System.getenv("GITHUB_TOKEN") ?: findProperty("gpr.key") as String? ?: ""
+                }
+            }
+        }
         publications {
             create<MavenPublication>("maven") {
+                groupId = "io.sessioncast"
+                artifactId = project.name
+                version = project.version.toString()
+
                 from(components["java"])
 
                 pom {
