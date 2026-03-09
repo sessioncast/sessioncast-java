@@ -74,18 +74,29 @@ public sealed interface Message permits
     // ========== Outgoing Messages (Agent → Relay) ==========
 
     record RegisterMessage(
-        @JsonProperty("machineId") String machineId,
-        @JsonProperty("label") String label,
-        @JsonProperty("token") String token,
+        @JsonProperty("session") String session,
         @JsonProperty("role") String role,
+        @JsonProperty("meta") java.util.Map<String, String> meta,
         @JsonProperty("requiredCapabilities") String requiredCapabilities
     ) implements Message {
         public RegisterMessage(String machineId, String label, String token) {
-            this(machineId, label, token, "host", null);
+            this(machineId, "host", buildMeta(machineId, label, token), null);
         }
 
         public RegisterMessage(String machineId, String label, String token, String role) {
-            this(machineId, label, token, role, null);
+            this(machineId, role, buildMeta(machineId, label, token), null);
+        }
+
+        public RegisterMessage(String machineId, String label, String token, String role, String requiredCapabilities) {
+            this(machineId, role, buildMeta(machineId, label, token), requiredCapabilities);
+        }
+
+        private static java.util.Map<String, String> buildMeta(String machineId, String label, String token) {
+            var map = new java.util.LinkedHashMap<String, String>();
+            if (label != null) map.put("label", label);
+            if (machineId != null) map.put("machineId", machineId);
+            if (token != null) map.put("token", token);
+            return map;
         }
 
         @Override
