@@ -114,6 +114,40 @@ public class ScreenCapture implements AutoCloseable {
         return activeTasks.containsKey(sessionName);
     }
 
+    // ========== Builder ==========
+
+    public static Builder builder(TmuxController tmux) {
+        return new Builder(tmux);
+    }
+
+    public static class Builder {
+        private final TmuxController tmux;
+        private ScreenCompressor compressor;
+        private Duration activeInterval;
+        private Duration idleInterval;
+        private Duration idleThreshold;
+        private Duration forceSendInterval;
+
+        Builder(TmuxController tmux) {
+            this.tmux = tmux;
+        }
+
+        public Builder compressor(ScreenCompressor compressor) { this.compressor = compressor; return this; }
+        public Builder activeInterval(Duration d) { this.activeInterval = d; return this; }
+        public Builder idleInterval(Duration d) { this.idleInterval = d; return this; }
+        public Builder idleThreshold(Duration d) { this.idleThreshold = d; return this; }
+        public Builder forceSendInterval(Duration d) { this.forceSendInterval = d; return this; }
+
+        public ScreenCapture build() {
+            ScreenCapture sc = new ScreenCapture(tmux, compressor != null ? compressor : new ScreenCompressor());
+            if (activeInterval != null) sc.setActiveInterval(activeInterval);
+            if (idleInterval != null) sc.setIdleInterval(idleInterval);
+            if (idleThreshold != null) sc.setIdleThreshold(idleThreshold);
+            if (forceSendInterval != null) sc.setForceSendInterval(forceSendInterval);
+            return sc;
+        }
+    }
+
     @Override
     public void close() {
         stopAll();
@@ -190,7 +224,8 @@ public class ScreenCapture implements AutoCloseable {
 
                 // Send if content changed or force send interval reached
                 if (contentChanged || forceSend) {
-                    ScreenData data = compressor.compressScreenData(sessionName, content);
+                    ScreenData data = compressor.compressScreenData(sessionName, content)
+                        .withIdle(isIdle);
                     handler.accept(data);
                     lastSendTime = now;
                 }

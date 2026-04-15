@@ -61,6 +61,7 @@ public class SessionCastClient implements AutoCloseable {
     private final ScreenCapture screenCapture;
     private final EventBus eventBus;
     private final RelayWebSocketClient wsClient;
+    private final boolean localMode; // true = no relay, direct tmux only
     private final ScheduledExecutorService scheduler;
 
     // Session tracking
@@ -77,11 +78,12 @@ public class SessionCastClient implements AutoCloseable {
     private final CompletableFuture<java.util.Set<Capability>> capabilityFuture = new CompletableFuture<>();
 
     private SessionCastClient(Builder builder) {
-        this.config = builder.buildConfig();
+        this.localMode = builder.token == null || builder.token.isBlank();
+        this.config = localMode ? null : builder.buildConfig();
         this.eventBus = new EventBus(true);
         this.tmux = builder.tmuxController != null ? builder.tmuxController : new TmuxController();
         this.screenCapture = new ScreenCapture(tmux, new ScreenCompressor());
-        this.wsClient = new RelayWebSocketClient(config, eventBus);
+        this.wsClient = localMode ? null : new RelayWebSocketClient(config, eventBus);
         this.autoStreamOnCreate = builder.autoStreamOnCreate;
         this.apiTimeout = builder.apiTimeout;
         this.llmTimeout = builder.llmTimeout;
@@ -118,7 +120,18 @@ public class SessionCastClient implements AutoCloseable {
      * Connect to the relay server.
      */
     public CompletableFuture<Void> connect() {
+        if (localMode) {
+            log.info("Local mode — no relay connection needed");
+            return CompletableFuture.completedFuture(null);
+        }
         return wsClient.connect();
+    }
+
+    /**
+     * Check if running in local-direct mode (no relay).
+     */
+    public boolean isLocalMode() {
+        return localMode;
     }
 
     /**
@@ -342,6 +355,18 @@ public class SessionCastClient implements AutoCloseable {
      * @return a future that resolves with the execution result
      */
     public CompletableFuture<ExecResult> exec(String command, ExecOptions options) {
+        // Local mode: execute directly via tmux
+        if (localMode) {
+            return CompletableFuture.supplyAsync(() -> {
+                String output = SessionCastLocal.execOnce(SessionCastLocal.ExecSpec.builder()
+                    .command(command)
+                    .cwd(options.cwd())
+                    .maxWait(options.timeout() != null ? options.timeout() : apiTimeout)
+                    .build());
+                return new ExecResult(0, output != null ? output : "", "", 0);
+            });
+        }
+
         // Check EXEC_CWD capability if cwd is specified
         if (options.cwd() != null && !grantedCapabilities.contains(Capability.EXEC_CWD)) {
             return CompletableFuture.failedFuture(

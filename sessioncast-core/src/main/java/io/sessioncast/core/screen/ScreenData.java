@@ -10,6 +10,7 @@ public record ScreenData(
     String content,           // Raw ANSI content
     byte[] compressed,        // Gzip compressed data (nullable)
     boolean isCompressed,
+    boolean idle,             // Whether the screen is idle (no changes for idleThreshold)
     long timestamp,
     int cols,
     int rows
@@ -28,36 +29,29 @@ public record ScreenData(
      * Create uncompressed screen data.
      */
     public static ScreenData uncompressed(String sessionName, String content) {
-        return new ScreenData(
-            sessionName,
-            content,
-            null,
-            false,
-            System.currentTimeMillis(),
-            80,  // default cols
-            24   // default rows
-        );
+        return new ScreenData(sessionName, content, null, false, false,
+            System.currentTimeMillis(), 80, 24);
     }
 
     /**
      * Create compressed screen data.
      */
     public static ScreenData compressed(String sessionName, String content, byte[] compressedData) {
-        return new ScreenData(
-            sessionName,
-            content,
-            compressedData,
-            true,
-            System.currentTimeMillis(),
-            80,
-            24
-        );
+        return new ScreenData(sessionName, content, compressedData, true, false,
+            System.currentTimeMillis(), 80, 24);
+    }
+
+    /**
+     * Create screen data with idle flag.
+     */
+    public ScreenData withIdle(boolean idle) {
+        return new ScreenData(sessionName, content, compressed, isCompressed, idle, timestamp, cols, rows);
     }
 
     /**
      * Create screen data with dimensions.
      */
     public ScreenData withDimensions(int cols, int rows) {
-        return new ScreenData(sessionName, content, compressed, isCompressed, timestamp, cols, rows);
+        return new ScreenData(sessionName, content, compressed, isCompressed, idle, timestamp, cols, rows);
     }
 }
